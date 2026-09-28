@@ -36,11 +36,10 @@ FX = {
     "EUR": ("DEXUSEU", False, "EZ"),
 }
 EQUITY = {"NIKKEI": ("NIKKEI225", "JP"), "NASDAQ": ("NASDAQCOM", "US")}
+# 独・英・日の 10 年債(IRLTLT01xxM156N)は OECD の月平均値で、リターンを滑らかにして
+# トレンドを水増しするため使わない(修正記録 2)。
 BONDS = {
     "UST10": ("DGS10", "US"),
-    "DE10": ("IRLTLT01DEM156N", "DE"),
-    "GB10": ("IRLTLT01GBM156N", "GB"),
-    "JP10": ("IRLTLT01JPM156N", "JP"),
 }
 
 
@@ -57,6 +56,9 @@ def short_rate(country: str, cutoff: str | None) -> pd.Series:
     idx = parts[0].index
     for p in parts[1:]:
         idx = idx.union(p.index)
+    # 系列が途中で終わっても 3 か月は埋められるよう、暦の上の全月に広げてから埋める
+    last = pd.Timestamp(cutoff) if cutoff else pd.Timestamp.today()
+    idx = pd.date_range(idx.min(), last, freq="ME")
     out = pd.Series(np.nan, index=idx)
     for p in reversed(parts):  # 優先度の高いものが最後に上書きする
         p = p.reindex(idx)
@@ -80,7 +82,7 @@ def excess_returns(cutoff: str | None = None) -> pd.DataFrame:
         cols[name] = p / p.shift(1) - 1 - rates[ctry].reindex(p.index).shift(1) / 1200
     for name, (sid, ctry) in BONDS.items():
         y = month_end(load(sid), cutoff) / 100
-        dur = (1 - (1 + y / 2) ** -20) / y
+        dur = ((1 - (1 + y / 2) ** -20) / y).where(y != 0, 10.0)  # y→0 の極限は 10
         cols[name] = y.shift(1) / 12 - dur.shift(1) * (y - y.shift(1)) - rates[ctry].reindex(y.index).shift(1) / 1200
     return pd.DataFrame(cols).sort_index()
 
