@@ -67,3 +67,22 @@ def split(df: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
 
 def by_year(df: pd.DataFrame) -> pd.DataFrame:
     return df.groupby(pd.to_datetime(df["date"]).dt.year)["net"].agg(["count", "mean"])
+
+
+def evaluate_bps(p: Prices, trades: list[Trade], slip_bps: float, carry_bps_per_day: float) -> pd.DataFrame:
+    """損益を bp(0.01%)で測る。保有コストは暦日数 × carry_bps_per_day。"""
+    rows = []
+    for t in trades:
+        if t.side > 0:
+            e, x = p.ask_at(t.t_in), p.bid_at(t.t_out)
+        else:
+            e, x = p.bid_at(t.t_in), p.ask_at(t.t_out)
+        me, mx = p.mid_at(t.t_in), p.mid_at(t.t_out)
+        if np.isnan([e, x, me, mx]).any():
+            continue
+        days = (t.t_out - t.t_in).total_seconds() / 86400
+        carry = carry_bps_per_day * max(1, round(days)) if days > 0.25 else 0.0
+        rows.append({"date": t.date, "side": t.side,
+                     "net": t.side * (x - e) / me * 1e4 - 2 * slip_bps - carry,
+                     "raw": t.side * (mx - me) / me * 1e4})
+    return pd.DataFrame(rows, columns=["date", "side", "net", "raw"])
